@@ -51,6 +51,16 @@ endef
 
 $(eval $(call Profile,WNR2000V4))
 
+define Profile/WNR2000V5
+	NAME:=NETGEAR WNR2000V5
+	PACKAGES:=kmod-usb-core kmod-usb2 kmod-ledtrig-usbdev
+endef
+
+define Profile/WNR2000V5/Description
+	Package set optimized for the NETGEAR WNR2000V5
+endef
+
+$(eval $(call Profile,WNR2000V5))
 
 define Profile/WNR612V2
 	NAME:=NETGEAR WNR612V2 / On Networks N150

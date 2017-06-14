@@ -248,6 +248,7 @@ static struct mtd_part_parser uimage_generic_parser = {
 
 #define FW_MAGIC_WNR2000V3	0x32303033
 #define FW_MAGIC_WNR2000V4	0x32303034
+#define FW_MAGIC_WNR2000V5	0x32303035
 #define FW_MAGIC_WNR2200	0x32323030
 #define FW_MAGIC_WNR612V2	0x32303631
 #define FW_MAGIC_WNR1000V2	0x31303031
@@ -272,6 +273,7 @@ static ssize_t uimage_verify_wndr3700(u_char *buf, size_t len)
 	case FW_MAGIC_WPN824N:
 		break;
 	case FW_MAGIC_WNR2000V4:
+	case FW_MAGIC_WNR2000V5:
 		expected_type = IH_TYPE_KERNEL;
 		break;
 	default:
