@@ -17,12 +17,15 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
 #include <linux/platform_device.h>
+#include <linux/spi/spi_gpio.h>
+#include <linux/spi/74x164.h>
 
 #include <asm/mach-ath79/ath79.h>
 #include <asm/mach-ath79/ar71xx_regs.h>
 
 #include "common.h"
 #include "dev-eth.h"
+#include "dev-spi.h"
 #include "dev-gpio-buttons.h"
 #include "dev-leds-gpio.h"
 #include "dev-m25p80.h"
@@ -30,25 +33,25 @@
 #include "dev-wmac.h"
 #include "machtypes.h"
 
-/* AR9341 GPIOs */
-#define WNR2000V5_GPIO_LED_PWR_GREEN      0
-#define WNR2000V5_GPIO_LED_PWR_AMBER      1
-#define WNR2000V5_GPIO_LED_WPS            2
-#define WNR2000V5_GPIO_LED_WLAN           12
-#define WNR2000V5_GPIO_LED_LAN1_GREEN     13
-#define WNR2000V5_GPIO_LED_LAN2_GREEN     14
-#define WNR2000V5_GPIO_LED_LAN3_GREEN     15
-#define WNR2000V5_GPIO_LED_LAN4_GREEN     16
-#define WNR2000V5_GPIO_LED_LAN1_AMBER     18
-#define WNR2000V5_GPIO_LED_LAN2_AMBER     19
-#define WNR2000V5_GPIO_LED_LAN3_AMBER     20
-#define WNR2000V5_GPIO_LED_LAN4_AMBER     21
-#define WNR2000V5_GPIO_LED_WAN_GREEN      17
-#define WNR2000V5_GPIO_LED_WAN_AMBER      22
+/* HC164 */
+#define  WNR2000V5_GPIO_HC164_RST         14
+#define  WNR2000V5_GPIO_HC164_DAT         15
+#define  WNR2000V5_GPIO_HC164_CLK         16
+
+/* LEDs on HC164. Note that the 74x164 use reverse order from Netgear's
+   original code, which are reflected in the macros below. */
+#define HC164_BASE 100
+#define HC164_GPIO(n) (HC164_BASE + 7 - n)
+#define WNR2000V5_GPIO_LED_PWR            HC164_GPIO(4)
+#define WNR2000V5_GPIO_LED_WPS            HC164_GPIO(7)
+#define WNR2000V5_GPIO_LED_WLAN           HC164_GPIO(7)
+#define WNR2000V5_GPIO_LED_WAN_GREEN      HC164_GPIO(0)
+#define WNR2000V5_GPIO_LED_WAN_AMBER      HC164_GPIO(6)
+#define WNR2000V5_GPIO_LED_STATUS         HC164_GPIO(5)
 /* Buttons */
-#define WNR2000V5_GPIO_BTN_WPS            3
-#define WNR2000V5_GPIO_BTN_RESET          4
-#define WNR2000V5_GPIO_BTN_WLAN           11
+#define WNR2000V5_GPIO_BTN_WPS            2
+#define WNR2000V5_GPIO_BTN_RESET          1
+#define WNR2000V5_GPIO_BTN_WLAN           0
 #define WNR2000V5_KEYS_POLL_INTERVAL      20      /* msecs */
 #define WNR2000V5_KEYS_DEBOUNCE_INTERVAL  (3 * WNR2000V5_KEYS_POLL_INTERVAL)
 
@@ -57,16 +60,72 @@
 #define WNR2000V5_MAC0_OFFSET             0       /* WAN/WLAN0 MAC   */
 #define WNR2000V5_MAC1_OFFSET             6       /* Eth-switch0 MAC */
 
+static struct spi_gpio_platform_data wnr2000v5_spi_gpio_data = {
+        .miso   = SPI_GPIO_NO_MISO,
+        .mosi   = WNR2000V5_GPIO_HC164_DAT,
+        .sck    = WNR2000V5_GPIO_HC164_CLK,
+        .num_chipselect = 1,
+};
+
+static struct platform_device wnr2000v5_spi_gpio_device = {
+        .name           = "spi_gpio",
+        .id             = 1, /* Bus number */
+        .dev            = {
+                .platform_data = &wnr2000v5_spi_gpio_data,
+        }
+};
+
+static struct ath79_spi_platform_data wnr2000v5_ath79_spi_data = {
+        .bus_num        = 0,
+        .num_chipselect = 1,
+};
+
+static struct flash_platform_data wnr2000v5_spi_flash_data = {
+        .name = "ath-nor0",
+        .type = "mx25l3205d",
+};
+
+static struct gen_74x164_chip_platform_data wnr2000v5_ssr_data = {
+	.base = HC164_BASE,
+	.num_registers = 1
+};
+
+static struct ath79_spi_controller_data wnr2000v5_spi0_cdata = {
+	.cs_type = ATH79_SPI_CS_TYPE_INTERNAL,
+	.cs_line = 0,
+	.is_flash = true,
+};
+
+static struct spi_board_info wnr2000v5_spi_info[] __initdata = {
+	{
+		.bus_num	= 0,
+		.chip_select	= 0,
+		.max_speed_hz	= 25000000,
+		//.modalias	= "spi-nor",
+		.modalias	= "m25p80",
+		.platform_data  = &wnr2000v5_spi_flash_data,
+		.controller_data = &wnr2000v5_spi0_cdata
+	},
+	{
+		.bus_num	= 1,
+		.chip_select	= 0,
+		.max_speed_hz	= 10000000,
+		.modalias	= "74x164",
+		.platform_data	= &wnr2000v5_ssr_data,
+		.controller_data = (void *)SPI_GPIO_NO_CHIPSELECT
+	}
+};
+
 static struct gpio_led wnr2000v5_leds_gpio[] __initdata = {
 	{
 		.name		= "netgear:green:power",
-		.gpio		= WNR2000V5_GPIO_LED_PWR_GREEN,
+		.gpio		= WNR2000V5_GPIO_LED_PWR,
 		.active_low	= 1,
 		.default_trigger = "default-on",
 	},
 	{
 		.name		= "netgear:amber:status",
-		.gpio		= WNR2000V5_GPIO_LED_PWR_AMBER,
+		.gpio		= WNR2000V5_GPIO_LED_STATUS,
 		.active_low	= 1,
 	},
 	{
@@ -84,52 +143,13 @@ static struct gpio_led wnr2000v5_leds_gpio[] __initdata = {
 		.gpio		= WNR2000V5_GPIO_LED_WLAN,
 		.active_low	= 1,
 	},
-	/* LAN LEDS */
-	{
-		.name		= "netgear:green:lan1",
-		.gpio		= WNR2000V5_GPIO_LED_LAN1_GREEN,
-		.active_low	= 1,
-	},
-	{
-		.name		= "netgear:green:lan2",
-		.gpio		= WNR2000V5_GPIO_LED_LAN2_GREEN,
-		.active_low	= 1,
-	},
-	{
-		.name		= "netgear:green:lan3",
-		.gpio		= WNR2000V5_GPIO_LED_LAN3_GREEN,
-		.active_low	= 1,
-	},
-	{
-		.name		= "netgear:green:lan4",
-		.gpio		= WNR2000V5_GPIO_LED_LAN4_GREEN,
-		.active_low	= 1,
-	},
-	{
-		.name		= "netgear:amber:lan1",
-		.gpio		= WNR2000V5_GPIO_LED_LAN1_AMBER,
-		.active_low	= 1,
-	},
-	{
-		.name		= "netgear:amber:lan2",
-		.gpio		= WNR2000V5_GPIO_LED_LAN2_AMBER,
-		.active_low	= 1,
-	},
-	{
-		.name		= "netgear:amber:lan3",
-		.gpio		= WNR2000V5_GPIO_LED_LAN3_AMBER,
-		.active_low	= 1,
-	},
-	{
-		.name		= "netgear:amber:lan4",
-		.gpio		= WNR2000V5_GPIO_LED_LAN4_AMBER,
-		.active_low	= 1,
-	},
+/*
 	{
 		.name		= "netgear:green:wps",
 		.gpio		= WNR2000V5_GPIO_LED_WPS,
 		.active_low	= 1,
 	},
+*/
 };
 
 static struct gpio_keys_button wnr2000v5_gpio_keys[] __initdata = {
@@ -159,11 +179,6 @@ static struct gpio_keys_button wnr2000v5_gpio_keys[] __initdata = {
 	},
 };
 
-static struct flash_platform_data wnr2000v5_flash_data = {
-        .name = "ath-nor0",
-        .type = "mx25l3205d",
-};
-
 static void __init wnr_common_setup(void)
 {
 	u8 *art = (u8 *) KSEG1ADDR(0x1fff0000);
@@ -175,7 +190,14 @@ static void __init wnr_common_setup(void)
 
 	ath79_register_usb();
 
-        ath79_register_m25p80(&wnr2000v5_flash_data);
+#if 0
+        spi_register_board_info(wnr2000v5_spi_info,
+                                ARRAY_SIZE(wnr2000v5_spi_info));
+#else
+	/* This calls spi_register_board_info and platform_device_register */
+	ath79_register_spi(&wnr2000v5_ath79_spi_data, wnr2000v5_spi_info,
+                           ARRAY_SIZE(wnr2000v5_spi_info));
+#endif
 
 	ath79_init_mac(ath79_eth0_data.mac_addr, art+WNR2000V5_MAC0_OFFSET, 0);
 	ath79_init_mac(ath79_eth1_data.mac_addr, art+WNR2000V5_MAC1_OFFSET, 0);
@@ -198,26 +220,39 @@ static void __init wnr_common_setup(void)
 	ath79_register_wmac(ee, art);
 }
 
-static void __init wnr2000v5_setup(void)
+static void __init wnr2000v5_led_setup(void)
 {
-	int i;
+	/* Set output */
+	ath79_gpio_direction_select(WNR2000V5_GPIO_HC164_RST, true);
+	ath79_gpio_direction_select(WNR2000V5_GPIO_HC164_DAT, true);
+	ath79_gpio_direction_select(WNR2000V5_GPIO_HC164_CLK, true);
 
-	wnr_common_setup();
-
-	/* Ensure no LED has an internal MUX signal, otherwise
-	control of LED could be lost... This is especially important
-	for most green LEDS (Eth,WAN).. who arrive in this function with
-	MUX signals set. */
-	for (i = 0; i < ARRAY_SIZE(wnr2000v5_leds_gpio); i++)
-		ath79_gpio_output_select(wnr2000v5_leds_gpio[i].gpio,
-					AR934X_GPIO_OUT_GPIO);
+	platform_device_register(&wnr2000v5_spi_gpio_device);
 
 	ath79_register_leds_gpio(-1, ARRAY_SIZE(wnr2000v5_leds_gpio),
 				 wnr2000v5_leds_gpio);
+}
+
+static void __init wnr2000v5_key_setup(void)
+{
+	int i;
+	/* Set input */
+	for (i = 0; i < ARRAY_SIZE(wnr2000v5_gpio_keys); i++) {
+		ath79_gpio_direction_select(wnr2000v5_gpio_keys[i].gpio, false);
+	}
 
 	ath79_register_gpio_keys_polled(-1, WNR2000V5_KEYS_POLL_INTERVAL,
 					ARRAY_SIZE(wnr2000v5_gpio_keys),
 					wnr2000v5_gpio_keys);
+}
+
+static void __init wnr2000v5_setup(void)
+{
+	wnr_common_setup();
+
+	wnr2000v5_led_setup();
+
+	wnr2000v5_key_setup();
 }
 
 MIPS_MACHINE(ATH79_MACH_WNR2000_V5, "WNR2000V5", "NETGEAR WNR2000 V5", wnr2000v5_setup);
